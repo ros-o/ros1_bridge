@@ -16,6 +16,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rmw_implementation_cmake REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(rclcpp_action REQUIRED)
 
 # find ROS 1 packages
 set(cmake_extras_files cmake/find_ros1_package.cmake cmake/find_ros1_interface_packages.cmake)
@@ -43,6 +44,7 @@ if(NOT ros1_roscpp_FOUND)
 endif()
 
 find_ros1_package(std_msgs REQUIRED)
+find_ros1_package(actionlib REQUIRED)
 
 # Dependency that we should only look for if ROS 1 is installed (it's not present on a ROS 2
 # system; see https://github.com/ros2/ros1_bridge/pull/331#issuecomment-1188111510)
@@ -87,9 +89,11 @@ if(BUILD_TESTING)
   find_package(geometry_msgs REQUIRED)
   find_package(std_msgs REQUIRED)
   find_package(sensor_msgs REQUIRED)
+  find_package(example_interfaces REQUIRED)
   find_ros1_package(geometry_msgs)
   find_ros1_package(std_msgs)
   find_ros1_package(sensor_msgs)
+  find_ros1_package(actionlib_tutorials)
   if(ros1_geometry_msgs_FOUND AND ros1_sensor_msgs_FOUND AND ros1_std_msgs_FOUND)
     ament_add_gtest(test_convert_generic test/test_convert_generic.cpp)
     ament_target_dependencies(test_convert_generic
@@ -148,7 +152,7 @@ foreach(package_name ${ros2_interface_packages})
       file(TO_CMAKE_PATH "${interface_file}" interface_name)
       get_filename_component(interface_basename "${interface_name}" NAME_WE)
       # skipping actions and request and response messages of services
-      if(NOT "${interface_name}" MATCHES "^(msg|srv)/" OR "${interface_basename}" MATCHES "_(Request|Response)$")
+      if(NOT "${interface_name}" MATCHES "^(msg|srv|action)/" OR "${interface_basename}" MATCHES "_(Request|Response)$")
         continue()
       endif()
       string(REPLACE "/" "__" interface_name "${interface_name}")
@@ -237,6 +241,7 @@ ament_target_dependencies(${PROJECT_NAME}
   ${prefixed_ros1_message_packages}
   ${ros2_interface_packages}
   "rclcpp"
+  "rclcpp_action"
   "ros1_roscpp"
   "ros1_std_msgs")
 
@@ -275,6 +280,17 @@ if(TEST_ROS1_BRIDGE)
   set(TEST_BRIDGE_DYNAMIC_BRIDGE "$<TARGET_FILE:dynamic_bridge>")
   set(TEST_BRIDGE_ROS2_CLIENT "$<TARGET_FILE:test_ros2_client_cpp>")
   set(TEST_BRIDGE_ROS2_SERVER "$<TARGET_FILE:test_ros2_server_cpp>")
+
+  # Action test executables
+  if(ros1_actionlib_tutorials_FOUND)
+    custom_executable(test_ros2_action_client_cpp "test/test_ros2_action_client.cpp")
+    ament_target_dependencies("test_ros2_action_client_cpp${target_suffix}" "example_interfaces" "rclcpp_action")
+    custom_executable(test_ros2_action_server_cpp "test/test_ros2_action_server.cpp")
+    ament_target_dependencies("test_ros2_action_server_cpp${target_suffix}" "example_interfaces" "rclcpp_action")
+
+    set(TEST_BRIDGE_ROS2_ACTION_CLIENT "$<TARGET_FILE:test_ros2_action_client_cpp>")
+    set(TEST_BRIDGE_ROS2_ACTION_SERVER "$<TARGET_FILE:test_ros2_action_server_cpp>")
+  endif()
 endif()
 
 macro(targets)
@@ -309,6 +325,23 @@ macro(targets)
     TARGET test_services_across_dynamic_bridge${target_suffix}
     ENV RMW_IMPLEMENTATION=${rmw_implementation}
     TIMEOUT 60)
+
+  if(ros1_actionlib_tutorials_FOUND)
+    configure_file(
+      test/test_actions_across_dynamic_bridge.py.in
+      test_actions_across_dynamic_bridge${target_suffix}.py.genexp
+      @ONLY
+    )
+    file(GENERATE
+      OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/test_actions_across_dynamic_bridge${target_suffix}_$<CONFIG>.py"
+      INPUT "${CMAKE_CURRENT_BINARY_DIR}/test_actions_across_dynamic_bridge${target_suffix}.py.genexp"
+    )
+    add_launch_test(
+      "${CMAKE_CURRENT_BINARY_DIR}/test_actions_across_dynamic_bridge${target_suffix}_$<CONFIG>.py"
+      TARGET test_actions_across_dynamic_bridge${target_suffix}
+      ENV RMW_IMPLEMENTATION=${rmw_implementation}
+      TIMEOUT 60)
+  endif()
 endmacro()
 
 if(TEST_ROS1_BRIDGE)
@@ -322,6 +355,16 @@ if(TEST_ROS1_BRIDGE)
   set(TEST_BRIDGE_ROSCORE "${ros1_roslaunch_PREFIX}/bin/roscore")
   set(TEST_BRIDGE_ROS1_CLIENT "$<TARGET_FILE:test_ros1_client>")
   set(TEST_BRIDGE_ROS1_SERVER "$<TARGET_FILE:test_ros1_server>")
+
+  # ROS1 action test executables
+  if(ros1_actionlib_tutorials_FOUND)
+    add_executable(test_ros1_action_client "test/test_ros1_action_client.cpp")
+    ament_target_dependencies(test_ros1_action_client "ros1_actionlib_tutorials" "ros1_roscpp")
+    add_executable(test_ros1_action_server "test/test_ros1_action_server.cpp")
+    ament_target_dependencies(test_ros1_action_server "ros1_actionlib_tutorials" "ros1_roscpp")
+    set(TEST_BRIDGE_ROS1_ACTION_CLIENT "$<TARGET_FILE:test_ros1_action_client>")
+    set(TEST_BRIDGE_ROS1_ACTION_SERVER "$<TARGET_FILE:test_ros1_action_server>")
+  endif()
 
   call_for_each_rmw_implementation(targets)
 endif()
@@ -340,5 +383,9 @@ install(
 )
 install(
   DIRECTORY resource
+  DESTINATION share/${PROJECT_NAME}
+)
+install(
+  FILES action_mappings.yaml
   DESTINATION share/${PROJECT_NAME}
 )
